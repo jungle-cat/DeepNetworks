@@ -30,10 +30,10 @@ void shuffle( const Mat_<Tp>& data, Mat_<Tp>& out, int dim )
 {
 	if (dim < 0) {
 		out = data.clone();
-		randShuffle_(out);
+		randShuffle(out);
 	}
 
-	if (dim > 0) {
+	if (dim == 0) {
 		vector<int> indices(data.cols);
 		iota(indices.begin(), indices.end(), 0);
 		random_shuffle(indices.begin(), indices.end());
@@ -46,7 +46,7 @@ void shuffle( const Mat_<Tp>& data, Mat_<Tp>& out, int dim )
 		}
 	}
 
-	if (dim == 0 ) {
+	if (dim > 0 ) {
 		vector<int> indices(data.rows);
 		iota(indices.begin(), indices.end(), 0);
 		random_shuffle(indices.begin(), indices.end());
@@ -68,6 +68,28 @@ Mat_<Tp> shuffle( const Mat_<Tp>& data, int dim )
 	Mat_<Tp> out;
 	shuffle(data, out, dim);
 	return out;
+}
+
+template <typename Tp>
+void sigm( const Mat_<Tp>& data, Mat_<Tp>& out )
+{
+	Mat_<Tp> s;
+	exp(-data, s);
+
+	s = 1 / (1 + s);
+	if (out.empty())
+		out = s;
+	else
+		s.copyTo(out);
+}
+
+
+template <typename Tp>
+Mat_<Tp> sigm( const Mat_<Tp>& data )
+{
+	Mat_<Tp> ret;
+	sigm(data, ret);
+	return ret;
 }
 
 

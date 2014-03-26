@@ -17,10 +17,18 @@ template <typename Tp = double>
 class RBM
 {
 	public:
-		RBM( const Mat_<Tp>& x, std::size_t nvisi, std::size_t nhidd,
-			 const Mat_<Tp>& w = Mat_<Tp>(), const Mat_<Tp>& biasv = Mat_<Tp>(),
-			 const Mat_<Tp>& biash = Mat_<Tp>() )
+		/*!
+		 * @param Construct a Restricted Boltzmann Machine.
+		 * @param nvisi Total number of visible units.
+		 * @param nhidd Total number of hidden units.
+		 * @param w The Weights between visible units and hidden units.
+		 * @param biasv Bias of visible units.
+		 * @param biash Bias of hidden units.
+		 */
+		RBM( std::size_t nvisi, std::size_t nhidd, const Mat_<Tp>& w = Mat_<Tp>(),
+			 const Mat_<Tp>& biasv = Mat_<Tp>(), const Mat_<Tp>& biash = Mat_<Tp>() )
 		{
+			// TODO check the parameter validity.
 			num_vis = nvisi;
 			num_hid = nhidd;
 
@@ -45,36 +53,55 @@ class RBM
 				biash.copyTo(bias_hid);
 		}
 
+		/*!
+		 * @brief Train a RBM given specific parameters.
+		 * @param x The training data with each sample per row.
+		 * @param nepochs
+		 * @param batch_size
+		 * @param learningrate
+		 * @param momentum
+		 * @return
+		 */
 		double train( const Mat_<Tp>& x, int nepochs, int batch_size, double learningrate = 0.1, double momentum = 0 )
 		{
+			// TODO check the parameter validity.
 			const int num = x.rows;
 			const int nbatches = num / batch_size;
 
 			double err = 0;
+			Mat_<Tp> w_m = Mat_<Tp>::zeros(weights.size());
+			Mat_<Tp> v_m = Mat_<Tp>::zeros(bias_vis.size());
+			Mat_<Tp> h_m = Mat_<Tp>::zeros(bias_hid.size());
+
 			for ( std::size_t i = 0; i < nepochs; ++i) {
 				auto td = shuffle(x, 1);
 				err = 0;
 
 				for ( auto j = 0; j < nbatches; ++j) {
-					auto batch = td.rowRange(j*batch_size, (j+1)*batch_size);
+					Mat_<Tp> batch = td.rowRange(j*batch_size, (j+1)*batch_size);
 
-					auto w_m = Mat_<Tp>::zeros(weights.size());
-					auto v_m = Mat_<Tp>::zeros(bias_vis.size());
-					auto h_m = Mat_<Tp>::zeros(bias_hid.size());
 					double err_epoch = train_epoch(batch, w_m, v_m, h_m, learningrate, momentum);
 
 					err += err_epoch;
 				} // end of each batch training
+				std::cerr << "epoch " << i << " : " << err / static_cast<double>(nbatches) << std::endl;
 			} // end of each epoch training
 
 			return err / static_cast<double>(nbatches);
 		}
 
 	private:
+		/*!
+		 * @brief
+		 * @param units
+		 * @param w
+		 * @param b
+		 * @param out
+		 */
 		void propagate( const Mat_<Tp>& units, const Mat_<Tp>& w, const Mat_<Tp>& b, Mat_<Tp>& out )
 		{
-			if ( units.cols != w.cols || w.cols != b.cols )
-				throw "Error."; //TODO Implement specific error exception.
+			if ( units.cols != w.rows || w.cols != b.cols )
+				throw invalid_argument("Error: propagate"); //TODO Implement specific error exception.
 
 			Mat_<Tp> t;
 			if (units.rows != 1) {
@@ -96,24 +123,6 @@ class RBM
 			return ret;
 		}
 
-		void sigm( const Mat_<Tp>& data, Mat_<Tp>& out )
-		{
-			Mat_<Tp> s;
-			exp(-data, s);
-
-			s = 1 / (1 + s);
-			if (out.empty())
-				out = s;
-			else
-				s.copyTo(out);
-		}
-
-		Mat_<Tp> sigm( const Mat_<Tp>& data )
-		{
-			Mat_<Tp> ret;
-			sigm(data, ret);
-			return ret;
-		}
 
 		void sigmrand( const Mat_<Tp>& data, Mat_<Tp>& out )
 		{
@@ -124,9 +133,8 @@ class RBM
 			Mat_<Tp> sample(size);
 			randu(sample, Scalar::all(0), Scalar::all(1));
 
-			Mat ret;
-			threshold(1 / (1 + sigm) > sample, ret, 127, 1, THRESH_BINARY);
-			ret.convertTo(out, out.type());
+			Mat ret = 1 / (1 + sigm) > sample;
+			ret.convertTo(out, out.type(), 1/255.0);
 		}
 
 		Mat_<Tp> sigmrand( const Mat_<Tp>& data )
@@ -136,26 +144,41 @@ class RBM
 			return ret;
 		}
 
-		double train_epoch( const Mat_<Tp>& samples, Mat_<Tp>& weight_m, Mat_<Tp>& biasvisi_m, Mat_<Tp>& biashidd_m, double learningrate, double momentum )
+		double train_epoch( const Mat_<Tp>& samples, Mat_<Tp>& weight_m, Mat_<Tp>& biasvis_m, Mat_<Tp>& biashid_m, double learningrate, double momentum )
 		{
+
 			// for all hidden units compute the probability of 1 and perform gibbs sample
 			auto v1 = samples;
-			auto h1 = sigmrand( propagate(v1, weights.t(), bias_vis) );
+			auto h1 = sigmrand( propagate(v1, weights.t(), bias_hid) );
+
 			// for all visible units compute the probability of 1 and perform gibbs sample
-			auto v2 = sigmrand( propagate(h1, weights, bias_hid) );
-			auto h2 = static_cast<Mat_<Tp> >( sigm(propagate(v2, weights.t(), bias_vis)) );
+			auto v2 = sigmrand( propagate(h1, weights, bias_vis) );
+			auto h2 = static_cast<Mat_<Tp> >( sigm(propagate(v2, weights.t(), bias_hid)) );
 
-			auto dc = h1.t() * bias_vis - h2.t() * bias_hid;
-			reduce(v1 - v2, v2, 0, CV_REDUCE_SUM);
-			reduce(h1 - h2, h2, 0, CV_REDUCE_SUM);
 
-			weight_m = momentum * weight_m + learningrate * dc;
-			bias_vis = momentum * bias_vis + learningrate * h2;
-			bias_hid = momentum * bias_hid + learningrate * v2;
 
-			double err = norm(v1 - v2, NORM_L2) / static_cast<double>(samples.rows);
-			return err*err;
+			//TODO trick and exception using reduce with integer type.
+			// while it's ok using float/double type matrix.
+			Mat_<Tp> dc = h1.t() * v1 - h2.t() * v2, dv, dh;
+			reduce(v1 - v2, dv, 0, CV_REDUCE_SUM);
+			reduce(h1 - h2, dh, 0, CV_REDUCE_SUM);
+
+			learningrate /= static_cast<double>(samples.rows);
+			addWeighted(weight_m, momentum, dc, learningrate, 0, weight_m);
+			addWeighted(biasvis_m, momentum, dv, learningrate, 0, biasvis_m);
+			addWeighted(biashid_m, momentum, dh, learningrate, 0, biashid_m);
+//			weight_m = momentum * weight_m + learningrate * dc;
+//			biasvis_m = momentum * biasvis_m + learningrate * dv;
+//			biashid_m = momentum * biashid_m + learningrate * dh;
+
+			weights += weight_m;
+			bias_vis += biasvis_m;
+			bias_hid += biashid_m;
+
+			double err = pow(norm(v1 - v2, NORM_L2), 2) / static_cast<double>(samples.rows);
+			return err;
 		}
+
 
 	public:
 		Mat_<Tp> weights;  //!< weights between visible and hidden units
